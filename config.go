@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 type Config interface {
@@ -46,34 +47,54 @@ func parseConfigStructTags(c Config) error {
 			return ErrCannotPutConfigTagOnPrivateField
 		}
 
-		tagValue := os.Getenv(tag)
+		parts := strings.Split(tag, ",")
+
+		envVarValue := os.Getenv(parts[0])
+		defaultValue := ""
+		for i, part := range parts {
+			if i == 0 {
+				continue
+			}
+
+			partParts := strings.SplitN(part, "=", 2)
+			switch partParts[0] {
+			case "default":
+				defaultValue = partParts[1]
+			default:
+				continue
+			}
+		}
+
+		if envVarValue == "" {
+			envVarValue = defaultValue
+		}
 
 		switch fieldKind {
 		case reflect.String:
-			field.SetString(tagValue)
+			field.SetString(envVarValue)
 		case reflect.Int:
-			if tagValue == "" {
-				tagValue = "0"
+			if envVarValue == "" {
+				envVarValue = "0"
 			}
-			intValue, err := strconv.Atoi(tagValue)
+			intValue, err := strconv.Atoi(envVarValue)
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
 			}
 			field.SetInt(int64(intValue))
 		case reflect.Float64:
-			if tagValue == "" {
-				tagValue = "0"
+			if envVarValue == "" {
+				envVarValue = "0"
 			}
-			floatValue, err := strconv.ParseFloat(tagValue, 64)
+			floatValue, err := strconv.ParseFloat(envVarValue, 64)
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
 			}
 			field.SetFloat(floatValue)
 		case reflect.Bool:
-			if tagValue == "" {
-				tagValue = "false"
+			if envVarValue == "" {
+				envVarValue = "false"
 			}
-			boolValue, err := strconv.ParseBool(tagValue)
+			boolValue, err := strconv.ParseBool(envVarValue)
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
 			}
@@ -91,7 +112,7 @@ func parseConfigStructTags(c Config) error {
 				return fmt.Errorf("%w: pointer must implement %v", ErrInvalidType, reflect.TypeFor[Loader]())
 			}
 
-			err := loader.Load(tagValue)
+			err := loader.Load(envVarValue)
 			if err != nil {
 				return fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
 			}

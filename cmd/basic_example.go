@@ -10,6 +10,7 @@ var _ config.Config = (*Config)(nil)
 
 type Config struct {
     VarA int `config:"VAR_A"`
+    VarB int `config:"VAR_B,default=20"`
 }
 
 func (c Config) Validate() error {
@@ -22,5 +23,7 @@ func main() {
     if err != nil {
         panic(err)
     }
-    fmt.Println(c.VarA)
+    fmt.Println("VarA", c.VarA)
+    fmt.Println("VarB", c.VarB)
 }
+

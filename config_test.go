@@ -71,6 +71,53 @@ func Test_Load_Succeeds_NegativeNumericValues(t *testing.T) {
 	assertEqual(t, -10.5, c.VarC)
 }
 
+type TestConfigAllTypesWithDefaults struct {
+	VarA string                   `config:"VAR_A,default=defaultvalue"`
+	VarB int                      `config:"VAR_B,default=10"`
+	VarC float64                  `config:"VAR_C,default=10.5"`
+	VarD *config.JSON[JSONConfig] `config:"VAR_D,default={\"field_1\": \"value_1\"}"`
+	VarE bool                     `config:"VAR_E,default=true"`
+	VarF int                      `config:"VAR_F,default=,random=blah"`
+}
+
+func (t TestConfigAllTypesWithDefaults) Validate() error {
+	return nil
+}
+
+func Test_Load_Succeeds_DefaultValuesNoEnvOverrides(t *testing.T) {
+	c := TestConfigAllTypesWithDefaults{}
+	err := config.Load(&c)
+	assertNoError(t, err)
+
+	assertEqual(t, "defaultvalue", c.VarA)
+	assertEqual(t, 10, c.VarB)
+	assertEqual(t, 10.5, c.VarC)
+	varD, err := c.VarD.Get()
+	assertNoError(t, err)
+	assertEqual(t, JSONConfig{Field1: "value_1"}, varD)
+	assertEqual(t, true, c.VarE)
+}
+
+func Test_Load_Succeeds_DefaultValuesEnvOverrides(t *testing.T) {
+	t.Setenv("VAR_A", "overridevalue")
+	t.Setenv("VAR_B", "100")
+	t.Setenv("VAR_C", "100.5")
+	t.Setenv("VAR_D", `{"field_1": "value2"}`)
+	t.Setenv("VAR_E", "false")
+	c := TestConfigAllTypesWithDefaults{}
+	err := config.Load(&c)
+	assertNoError(t, err)
+
+	assertEqual(t, "overridevalue", c.VarA)
+	assertEqual(t, 100, c.VarB)
+	assertEqual(t, 100.5, c.VarC)
+	varD, err := c.VarD.Get()
+	assertNoError(t, err)
+	assertEqual(t, JSONConfig{Field1: "value2"}, varD)
+	assertEqual(t, false, c.VarE)
+	assertEqual(t, 0, c.VarF)
+}
+
 type TestConfigInvalidTypes struct {
 	VarA time.Time `config:"VAR_A"`
 }
