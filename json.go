@@ -21,12 +21,12 @@ func (j *JSON[T]) Get() (T, error) {
 
 func (j *JSON[T]) Load(val string) error {
 	if j == nil {
-	    return errors.New("cannot load into nil")	
+		return errors.New("cannot load into nil")
 	}
 
-    if val == "" {
-        return nil
-    }
+	if val == "" {
+		return nil
+	}
 
 	var parsedVal T
 	err := json.Unmarshal([]byte(val), &parsedVal)

@@ -220,6 +220,29 @@ func Test_Load_Succeeds_PrivateField(t *testing.T) {
 	assertErrorIs(t, err, config.ErrCannotPutConfigTagOnPrivateField)
 }
 
+type TestConfigJSONTypes struct {
+	VarA *config.JSON[[]string]       `config:"VAR_A"`
+	VarB *config.JSON[map[string]int] `config:"VAR_B"`
+}
+
+func (t TestConfigJSONTypes) Validate() error {
+	return nil
+}
+
+func Test_Load_Succeeds_JSONTypes(t *testing.T) {
+	t.Setenv("VAR_A", `["str_a", "str_b", "str_c"]`)
+	t.Setenv("VAR_B", `{"key_1": 1, "key_2": 2, "key_3": 3}`)
+	c := TestConfigJSONTypes{}
+	err := config.Load(&c)
+	assertNoError(t, err)
+	varA, err := c.VarA.Get()
+	assertNoError(t, err)
+	assertEqualSlices(t, []string{"str_a", "str_b", "str_c"}, varA)
+	varB, err := c.VarB.Get()
+	assertNoError(t, err)
+	assertEqualMaps(t, map[string]int{"key_1": 1, "key_2": 2, "key_3": 3}, varB)
+}
+
 // Testing helpers... Thank you, Go standard library, for doing the absolute bare minimum. It is so "simple" to have to repeat basic stuff in every library ever written.
 
 func assertEqual[T comparable](t *testing.T, expected, actual T, msg ...string) {
@@ -229,6 +252,40 @@ func assertEqual[T comparable](t *testing.T, expected, actual T, msg ...string) 
 
 	t.Helper()
 	t.Errorf("expected %v, got %v; %s", expected, actual, strings.Join(msg, ""))
+}
+
+func assertEqualSlices[T comparable](t *testing.T, expected, actual []T, msg ...string) {
+	t.Helper()
+
+	if len(expected) != len(actual) {
+		t.Errorf("slice length unexpected; expected %d, got %d; %s", len(expected), len(actual), strings.Join(msg, ""))
+		return
+	}
+
+	for i := range len(expected) {
+		if expected[i] != actual[i] {
+			t.Errorf("slice mismatch at element %d: expected [%v], got [%v]; %s", i, expected[i], actual[i], strings.Join(msg, ""))
+			return
+		}
+	}
+}
+
+func assertEqualMaps[K comparable, V comparable](t *testing.T, expected, actual map[K]V, msg ...string) {
+	t.Helper()
+
+	if len(expected) != len(actual) {
+		t.Errorf("map length unexpected; expected %d, got %d; %s", len(expected), len(actual), strings.Join(msg, ""))
+		return
+	}
+
+	for k, v := range expected {
+		if v2, ok := actual[k]; !ok {
+			t.Errorf("missing key %v in actual map; %s", k, strings.Join(msg, ""))
+			return
+		} else if v != v2 {
+			t.Errorf("value mismatch for key %v; expected %v, got %v; %s", k, v, v2, strings.Join(msg, ""))
+		}
+	}
 }
 
 func assertError(t *testing.T, err error, msg ...string) {
