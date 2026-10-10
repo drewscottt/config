@@ -40,6 +40,11 @@ func main() {
 VAR_A=10 go run cmd/basic_example.go
 ```
 
+```
+VarA 10
+VarB 20
+```
+
 # Suppported Types
 
 Currently, native types `int`, `float64`, `string`, and `bool` are supported. Use `JSON` to support serialization of other data types (e.g. structs, slices, maps).
