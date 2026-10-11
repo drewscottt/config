@@ -2,7 +2,6 @@ package config_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +16,7 @@ type TestConfigAllTypes struct {
 	VarC float64                  `config:"VAR_C"`
 	VarD *config.JSON[JSONConfig] `config:"VAR_D"`
 	VarE bool                     `config:"VAR_E"`
+	VarF *config.HotReload[int]   `config:"VAR_F"`
 }
 
 func (t TestConfigAllTypes) Validate() error {
@@ -33,6 +33,7 @@ func Test_Load_Succeeds(t *testing.T) {
 	t.Setenv("VAR_C", "10.5")
 	t.Setenv("VAR_D", `{"field_1": "value1"}`)
 	t.Setenv("VAR_E", "true")
+	t.Setenv("VAR_F", "10")
 	c := TestConfigAllTypes{}
 	err := config.Load(&c)
 	assertNoError(t, err)
@@ -44,6 +45,9 @@ func Test_Load_Succeeds(t *testing.T) {
 	assertNoError(t, err)
 	assertEqual(t, JSONConfig{Field1: "value1"}, varD)
 	assertEqual(t, true, c.VarE)
+	varF, err := c.VarF.Get()
+	assertNoError(t, err)
+	assertEqual(t, 10, varF)
 }
 
 func Test_Load_Succeeds_ZeroValues(t *testing.T) {
@@ -290,74 +294,21 @@ func Test_Load_Succeeds_JSONTypes(t *testing.T) {
 	assertEqualMaps(t, map[string]int{"key_1": 1, "key_2": 2, "key_3": 3}, varB)
 }
 
-// Testing helpers... Thank you, Go standard library, for doing the absolute bare minimum. It is so "simple" to have to repeat basic stuff in every library ever written.
+type NotStructButImplementsConfig int
 
-func assertEqual[T comparable](t *testing.T, expected, actual T, msg ...string) {
-	if expected == actual {
-		return
-	}
-
-	t.Helper()
-	t.Errorf("expected %v, got %v; %s", expected, actual, strings.Join(msg, ""))
+func (n NotStructButImplementsConfig) Validate() error {
+	return nil
 }
 
-func assertEqualSlices[T comparable](t *testing.T, expected, actual []T, msg ...string) {
-	t.Helper()
+func Test_Load_Fails_InvalidConfigType(t *testing.T) {
+	t.Run("not a pointer", func(t *testing.T) {
+		err := config.Load(TestConfigAllTypes{})
+		assertErrorIs(t, err, config.ErrConfigMustBePointerToStruct)
+	})
 
-	if len(expected) != len(actual) {
-		t.Errorf("slice length unexpected; expected %d, got %d; %s", len(expected), len(actual), strings.Join(msg, ""))
-		return
-	}
-
-	for i := range len(expected) {
-		if expected[i] != actual[i] {
-			t.Errorf("slice mismatch at element %d: expected [%v], got [%v]; %s", i, expected[i], actual[i], strings.Join(msg, ""))
-			return
-		}
-	}
-}
-
-func assertEqualMaps[K comparable, V comparable](t *testing.T, expected, actual map[K]V, msg ...string) {
-	t.Helper()
-
-	if len(expected) != len(actual) {
-		t.Errorf("map length unexpected; expected %d, got %d; %s", len(expected), len(actual), strings.Join(msg, ""))
-		return
-	}
-
-	for k, v := range expected {
-		if v2, ok := actual[k]; !ok {
-			t.Errorf("missing key %v in actual map; %s", k, strings.Join(msg, ""))
-			return
-		} else if v != v2 {
-			t.Errorf("value mismatch for key %v; expected %v, got %v; %s", k, v, v2, strings.Join(msg, ""))
-		}
-	}
-}
-
-func assertError(t *testing.T, err error, msg ...string) {
-	if err != nil {
-		return
-	}
-
-	t.Helper()
-	t.Errorf("expected error, but got nil; %s", strings.Join(msg, ""))
-}
-
-func assertNoError(t *testing.T, err error, msg ...string) {
-	if err == nil {
-		return
-	}
-
-	t.Helper()
-	t.Errorf("received unexpected error: %v; %s", err, strings.Join(msg, ""))
-}
-
-func assertErrorIs(t *testing.T, err, targetErr error, msg ...string) {
-	if errors.Is(err, targetErr) {
-		return
-	}
-
-	t.Helper()
-	t.Errorf("received unexpected error: [%v]; expected [%v]; %s", err, targetErr, strings.Join(msg, ""))
+	t.Run("pointer to non struct", func(t *testing.T) {
+		notConfig := NotStructButImplementsConfig(10)
+		err := config.Load(&notConfig)
+		assertErrorIs(t, err, config.ErrConfigMustBePointerToStruct)
+	})
 }
