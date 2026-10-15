@@ -1,11 +1,11 @@
 package config
 
 import (
+	"context"
 	"fmt"
-	"os"
 	"reflect"
-	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is an interface to provide runtime configuration based on environment.
@@ -13,16 +13,25 @@ type Config interface {
 	Validate() error
 }
 
-// Load loads the [Config] according to the environment and struct tags.
+// Load loads the [Config] from the config provider(s) and according to the struct tag definition.
 //
 // Config must be a pointer to a struct.
 //
 // Each field with a `config` tag in the implementation struct will be loaded with a value according to the
-// corresponding environment variable, or default value.
-// The `config` tag is structured like: `config:"ENV_VAR_NAME,default=<optional default value>"`
+// corresponding environment variable, environment provider, or default value.
+//
+// The `config` tag is structured like: `config:"VAR_NAME,default=<optional default value>"`
 // The fields with `config` tags must have types with kind: string, int, float64, bool, or be a pointer to [Loader].
-func Load(c Config) error {
-	err := parseConfigStructTags(c)
+func Load(c Config, opts ...LoadOption) error {
+	lc := LoadConfig{
+		ConfigProviders: []ConfigProvider{},
+	}
+	for _, opt := range opts {
+		opt(&lc)
+	}
+	lc.ConfigProviders = append(lc.ConfigProviders, EnvironmentProvider{})
+
+	err := loadConfigVariables(c, lc)
 	if err != nil {
 		return err
 	}
@@ -31,10 +40,47 @@ func Load(c Config) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrValidation, err)
 	}
+
 	return nil
 }
 
-func parseConfigStructTags(c Config) error {
+// LoadConfig is the configuration for [Load] and for [Loader.Load].
+type LoadConfig struct {
+	ConfigProviders   []ConfigProvider
+	HotReloadInterval time.Duration
+	HotReloadContext  context.Context
+}
+
+// LoadOption is a functional option for customizing [Load].
+type LoadOption func(*LoadConfig)
+
+// AddConfigProvider adds a new [ConfigProvider] to [Load].
+// By default, [EnvironmentProvider] is used.
+// Order matters; the first added [ConfigProvider] takes first priority, then the [EnvironmentProvider] takes last priority.
+func AddConfigProvider(cp ConfigProvider) LoadOption {
+	return func(lc *LoadConfig) {
+		if lc.ConfigProviders == nil {
+			lc.ConfigProviders = make([]ConfigProvider, 0, 1)
+		}
+		lc.ConfigProviders = append(lc.ConfigProviders, cp)
+	}
+}
+
+// SetHotReloadInterval sets the interval for hot reloading.
+func SetHotReloadInterval(d time.Duration) LoadOption {
+	return func(lc *LoadConfig) {
+		lc.HotReloadInterval = d
+	}
+}
+
+// SetHotReloadInterval sets the context for managing the hot reloading lifecycle.
+func SetHotReloadContext(c context.Context) LoadOption {
+	return func(lc *LoadConfig) {
+		lc.HotReloadContext = c
+	}
+}
+
+func loadConfigVariables(c Config, loadConfig LoadConfig) error {
 	if reflect.TypeOf(c).Kind() != reflect.Pointer {
 		return ErrConfigMustBePointerToStruct
 	}
@@ -60,76 +106,26 @@ func parseConfigStructTags(c Config) error {
 			return ErrCannotPutConfigTagOnPrivateField
 		}
 
-		envVar := configStructTagToEnvVar(tag)
+		configVariable := configStructTagToConfigVariable(tag)
+		err := loadVariableValue(&configVariable, loadConfig)
+		if err != nil {
+			return err // TODO
+		}
 
-		parsedEnvVar, err := parseEnvVariable(envVar, structFieldValue.Type())
+		parsedConfigVariable, err := configVariable.ParseIntoType(structFieldValue.Type(), loadConfig)
 		if err != nil {
 			return err
 		}
-		structFieldValue.Set(reflect.ValueOf(parsedEnvVar))
+		structFieldValue.Set(reflect.ValueOf(parsedConfigVariable))
 	}
 
 	return nil
 }
 
-func parseEnvVariable(envVar EnvironmentVariable, intoType reflect.Type) (any, error) {
-	envVarValue := envVar.Value()
-
-	intoKind := intoType.Kind()
-
-	switch intoKind {
-	case reflect.String:
-		return envVarValue, nil
-	case reflect.Int:
-		if envVarValue == "" {
-			envVarValue = "0"
-		}
-		intValue, err := strconv.Atoi(envVarValue)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
-		}
-		return intValue, nil
-	case reflect.Float64:
-		if envVarValue == "" {
-			envVarValue = "0"
-		}
-		floatValue, err := strconv.ParseFloat(envVarValue, 64)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
-		}
-		return floatValue, nil
-	case reflect.Bool:
-		if envVarValue == "" {
-			envVarValue = "false"
-		}
-		boolValue, err := strconv.ParseBool(envVarValue)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
-		}
-		return boolValue, nil
-	case reflect.Pointer:
-		newValue := reflect.New(intoType.Elem())
-
-		iFace := newValue.Interface()
-		loader, ok := iFace.(Loader)
-		if !ok {
-			return nil, fmt.Errorf("%w: pointer must implement %v", ErrInvalidType, reflect.TypeFor[Loader]())
-		}
-
-		err := loader.Load(envVar)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrInvalidValueForType, err)
-		}
-		return loader, nil
-	default:
-		return nil, fmt.Errorf("%w: %v", ErrInvalidType, intoKind)
-	}
-}
-
-func configStructTagToEnvVar(tagValue string) EnvironmentVariable {
+func configStructTagToConfigVariable(tagValue string) ConfigVariable {
 	parts := strings.Split(tagValue, ",")
 
-	envVarName := parts[0]
+	configVarName := parts[0]
 	defaultValue := ""
 	for i, part := range parts {
 		if i == 0 {
@@ -145,9 +141,28 @@ func configStructTagToEnvVar(tagValue string) EnvironmentVariable {
 		}
 	}
 
-	return EnvironmentVariable{
-		Name:             envVarName,
-		EnvironmentValue: os.Getenv(envVarName),
-		DefaultValue:     defaultValue,
+	return ConfigVariable{
+		Name:         configVarName,
+		DefaultValue: defaultValue,
 	}
+}
+
+func loadVariableValue(configVariable *ConfigVariable, lc LoadConfig) error {
+	value := ""
+	defer func() {
+		configVariable.ProviderValue = value
+	}()
+
+	for _, cp := range lc.ConfigProviders {
+		providerValue, err := cp.LoadConfigVariable(configVariable.Name)
+		if err != nil {
+			return err
+		}
+		if providerValue != "" {
+			value = providerValue
+			return nil
+		}
+	}
+	value = configVariable.DefaultValue
+	return nil
 }

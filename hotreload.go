@@ -2,57 +2,82 @@ package config
 
 import (
 	"context"
-	"errors"
-	"os"
 	"reflect"
 	"time"
 )
 
 const (
-	HotReloadInterval = time.Second
+	defaultHotReloadInterval = time.Second
 )
 
 // HotReload implements [Loader].
-// It reloads the environment variable periodically.
+// It reloads the [ConfigVariable] periodically.
 // Any type compatible with [Load] can be used here.
+//
+// Due to the way that operating systems manage processes and environment variables, [EnvironmentProvider] is not sufficient for hot reloading updates.
+// Using another [ConfigProvider], like [FileProvider], is necessary.
 type HotReload[T any] struct {
 	val     T
-	Context context.Context // optional context for managing reloading lifecycle, mostly just for testing.
+	context context.Context // optional context for managing reloading lifecycle, mostly just for testing.
 }
 
 var _ Loader = (*HotReload[string])(nil)
 
-func (h *HotReload[T]) Load(envVar EnvironmentVariable) error {
+// Load implements [Loader].
+// It loads the variable, then starts a background goroutine to pick up changes.
+func (h *HotReload[T]) Load(configVariable ConfigVariable, loadConfig LoadConfig) error {
 	if h == nil {
-		return errors.New("hot reload is nil")
+		return ErrLoaderNotInitialized
 	}
 
-	parsedVar, err := parseEnvVariable(envVar, reflect.TypeFor[T]())
+	parsedVar, err := configVariable.ParseIntoType(reflect.TypeFor[T](), loadConfig)
 	if err != nil {
 		return err
 	}
 	h.val = parsedVar.(T)
 
 	go func() {
-		ticker := time.NewTicker(HotReloadInterval)
-		if h.Context == nil {
-			h.Context = context.Background()
+		hotReloadInterval := defaultHotReloadInterval
+		if loadConfig.HotReloadInterval != 0 {
+			hotReloadInterval = loadConfig.HotReloadInterval
+		}
+		ticker := time.NewTicker(hotReloadInterval)
+		if h.context == nil {
+			if loadConfig.HotReloadContext == nil {
+				h.context = context.Background()
+			} else {
+				h.context = loadConfig.HotReloadContext
+			}
 		}
 
 		for {
 			select {
 			case <-ticker.C:
-				updatedEnvVarValue := os.Getenv(envVar.Name)
-				envVar.EnvironmentValue = updatedEnvVarValue
-
-				parsedVar, err := parseEnvVariable(envVar, reflect.TypeFor[T]())
+				err := loadVariableValue(&configVariable, loadConfig)
 				if err != nil {
-					// TODO: our options are to either silently fail, and keep the last valid value,
-					// or, return an error from Get()
+					// TODO: our options are to either silently fail and keep the last valid value,
+					// or return an error from Get()
 					continue
 				}
-				h.val = parsedVar.(T)
-			case <-h.Context.Done():
+
+				parsedVar, err := configVariable.ParseIntoType(reflect.TypeFor[T](), loadConfig)
+				if err != nil {
+					// TODO: our options are to either silently fail and keep the last valid value,
+					// or return an error from Get()
+					continue
+				}
+
+				typedVar, ok := parsedVar.(T)
+				if !ok {
+					// TODO: our options are to either silently fail and keep the last valid value,
+					// or return an error from Get()
+					continue
+				}
+
+				// TODO: need to re-validate Config here?
+
+				h.val = typedVar
+			case <-h.context.Done():
 				return
 			}
 
@@ -65,7 +90,7 @@ func (h *HotReload[T]) Load(envVar EnvironmentVariable) error {
 func (h *HotReload[T]) Get() (T, error) {
 	var zeroValue T
 	if h == nil {
-		return zeroValue, errors.New("hot reload is nil")
+		return zeroValue, ErrLoaderNotInitialized
 	}
 	return h.val, nil
 }

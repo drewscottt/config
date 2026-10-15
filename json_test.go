@@ -8,7 +8,7 @@ import (
 
 func Test_JSON_LoadGet_Succeeds(t *testing.T) {
 	j := &config.JSON[string]{}
-	err := j.Load(config.EnvironmentVariable{EnvironmentValue: `"hello world"`})
+	err := j.Load(config.ConfigVariable{ProviderValue: `"hello world"`}, config.LoadConfig{})
 	assertNoError(t, err)
 
 	val, err := j.Get()
@@ -18,9 +18,9 @@ func Test_JSON_LoadGet_Succeeds(t *testing.T) {
 
 func Test_JSON_LoadGet_Fails_WhenNil(t *testing.T) {
 	var j *config.JSON[string]
-	err := j.Load(config.EnvironmentVariable{EnvironmentValue: `"hello world"`})
-	assertError(t, err)
+	err := j.Load(config.ConfigVariable{ProviderValue: `"hello world"`}, config.LoadConfig{})
+	assertErrorIs(t, err, config.ErrLoaderNotInitialized)
 
 	_, err = j.Get()
-	assertError(t, err)
+	assertErrorIs(t, err, config.ErrLoaderNotInitialized)
 }

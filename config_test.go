@@ -1,8 +1,10 @@
 package config_test
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/drewscottt/config"
@@ -133,7 +135,7 @@ func (t TestConfigInvalidTypes) Validate() error {
 func Test_Load_Fails_InvalidTypes(t *testing.T) {
 	c := TestConfigInvalidTypes{}
 	err := config.Load(&c)
-	assertErrorIs(t, err, config.ErrInvalidType)
+	assertErrorIs(t, err, config.ErrInvalidVariableType)
 }
 
 type TestConfigInvalidPointer struct {
@@ -147,7 +149,7 @@ func (t TestConfigInvalidPointer) Validate() error {
 func Test_Load_Fails_InvalidPointer(t *testing.T) {
 	c := TestConfigInvalidPointer{}
 	err := config.Load(&c)
-	assertErrorIs(t, err, config.ErrInvalidType)
+	assertErrorIs(t, err, config.ErrInvalidVariableType)
 }
 
 type TestConfigValidateError struct {
@@ -204,28 +206,28 @@ func Test_Load_Fails_InvalidValuesForTypes(t *testing.T) {
 		t.Setenv("VAR_A", "doesnt_parse_as_int")
 		c := TestConfigInt{}
 		err := config.Load(&c)
-		assertErrorIs(t, err, config.ErrInvalidValueForType)
+		assertErrorIs(t, err, config.ErrInvalidValueForVariableType)
 	})
 
 	t.Run("invalid bool", func(t *testing.T) {
 		t.Setenv("VAR_A", "doesnt_parse_as_bool")
 		c := TestConfigBool{}
 		err := config.Load(&c)
-		assertErrorIs(t, err, config.ErrInvalidValueForType)
+		assertErrorIs(t, err, config.ErrInvalidValueForVariableType)
 	})
 
 	t.Run("invalid json", func(t *testing.T) {
 		t.Setenv("VAR_A", `{"invalid_json":}`)
 		c := TestConfigJSON{}
 		err := config.Load(&c)
-		assertErrorIs(t, err, config.ErrInvalidValueForType)
+		assertErrorIs(t, err, config.ErrInvalidValueForVariableType)
 	})
 
 	t.Run("invalid float64", func(t *testing.T) {
 		t.Setenv("VAR_A", "doesnt_parse_as_float64")
 		c := TestConfigFloat64{}
 		err := config.Load(&c)
-		assertErrorIs(t, err, config.ErrInvalidValueForType)
+		assertErrorIs(t, err, config.ErrInvalidValueForVariableType)
 	})
 }
 
@@ -311,4 +313,68 @@ func Test_Load_Fails_InvalidConfigType(t *testing.T) {
 		err := config.Load(&notConfig)
 		assertErrorIs(t, err, config.ErrConfigMustBePointerToStruct)
 	})
+}
+
+type TestConfigHotReloadJSON struct {
+	VarA *config.HotReload[*config.JSON[JSONConfig]] `config:"VAR_A,default={\"field_1\": \"default\"}"`
+}
+
+func (t TestConfigHotReloadJSON) Validate() error {
+	return nil
+}
+
+func Test_Load_HotReloadJSON(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		hotReloadInterval := time.Second
+		hotReloadContext, ctxCancel := context.WithCancel(t.Context())
+		c := TestConfigHotReloadJSON{}
+		err := config.Load(&c, config.SetHotReloadInterval(hotReloadInterval), config.SetHotReloadContext(hotReloadContext))
+		assertNoError(t, err)
+
+		jsonVar, err := c.VarA.Get()
+		assertNoError(t, err)
+		varA, err := jsonVar.Get()
+		assertNoError(t, err)
+		assertEqual(t, JSONConfig{Field1: "default"}, varA)
+
+		t.Setenv("VAR_A", `{"field_1": "new_value"}`)
+		time.Sleep(hotReloadInterval * 2)
+
+		jsonVar, err = c.VarA.Get()
+		assertNoError(t, err)
+		varA, err = jsonVar.Get()
+		assertNoError(t, err)
+		assertEqual(t, JSONConfig{Field1: "new_value"}, varA)
+
+		ctxCancel()
+		synctest.Wait()
+	})
+}
+
+type (
+	AliasedString  string
+	AliasedInt     int
+	AliasedBool    bool
+	AliasedFloat64 float64
+)
+
+type TestConfigAliasedTypes struct {
+	VarA AliasedString  `config:"VAR_A,default=string_kind"`
+	VarB AliasedInt     `config:"VAR_B,default=10"`
+	VarC AliasedBool    `config:"VAR_C,default=true"`
+	VarD AliasedFloat64 `config:"VAR_D,default=10.5"`
+}
+
+func (t TestConfigAliasedTypes) Validate() error {
+	return nil
+}
+
+func Test_Load_AliasedTypes(t *testing.T) {
+	c := TestConfigAliasedTypes{}
+	err := config.Load(&c)
+	assertNoError(t, err)
+	assertEqual(t, "string_kind", c.VarA)
+	assertEqual(t, 10, c.VarB)
+	assertEqual(t, true, c.VarC)
+	assertEqual(t, 10.5, c.VarD)
 }
