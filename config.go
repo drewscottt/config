@@ -97,6 +97,36 @@ func loadConfigVariables(c Config, loadConfig LoadConfig) error {
 
 		tag := structField.Tag.Get("config")
 		if tag == "" {
+			if structField.Type.Kind() != reflect.Struct {
+				continue
+			}
+
+			structFieldValue := configStruct.Field(i)
+
+			if !structFieldValue.CanAddr() {
+				continue
+			}
+
+			structFieldValuePtrValue := structFieldValue.Addr()
+
+			if !structFieldValuePtrValue.CanInterface() {
+				continue
+			}
+
+			subConfigPtr, ok := structFieldValuePtrValue.Interface().(Config)
+			if !ok {
+				continue
+			}
+
+			subErr := loadConfigVariables(subConfigPtr, loadConfig)
+			if subErr != nil {
+				return subErr
+			}
+
+			subErr = subConfigPtr.Validate()
+			if subErr != nil {
+				return fmt.Errorf("%w: %w", ErrValidation, subErr)
+			}
 			continue
 		}
 

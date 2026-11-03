@@ -378,3 +378,67 @@ func Test_Load_AliasedTypes(t *testing.T) {
 	assertEqual(t, true, c.VarC)
 	assertEqual(t, 10.5, c.VarD)
 }
+
+type TestConfigEmbeddedStruct struct {
+	TestConfigAllTypesWithDefaults
+}
+
+func Test_Load_EmbeddedStruct(t *testing.T) {
+	c := TestConfigEmbeddedStruct{}
+	err := config.Load(&c)
+	assertNoError(t, err)
+
+	assertEqual(t, "defaultvalue", c.VarA)
+	assertEqual(t, 10, c.VarB)
+	assertEqual(t, 10.5, c.VarC)
+	varD, err := c.VarD.Get()
+	assertNoError(t, err)
+	assertEqual(t, JSONConfig{Field1: "value_1"}, varD)
+	assertEqual(t, true, c.VarE)
+}
+
+type TestConfigNestedStruct struct {
+	Nested TestConfigAllTypesWithDefaults
+}
+
+func (t TestConfigNestedStruct) Validate() error {
+	return nil
+}
+
+func Test_Load_NestedStruct(t *testing.T) {
+	c := TestConfigNestedStruct{}
+	err := config.Load(&c)
+	assertNoError(t, err)
+
+	assertEqual(t, "defaultvalue", c.Nested.VarA)
+	assertEqual(t, 10, c.Nested.VarB)
+	assertEqual(t, 10.5, c.Nested.VarC)
+	varD, err := c.Nested.VarD.Get()
+	assertNoError(t, err)
+	assertEqual(t, JSONConfig{Field1: "value_1"}, varD)
+	assertEqual(t, true, c.Nested.VarE)
+}
+
+type TestConfigEmbeddedStructValidationError struct {
+	TestConfigValidateError
+}
+
+func Test_Load_EmbeddedStructValidationError(t *testing.T) {
+	c := TestConfigEmbeddedStructValidationError{}
+	err := config.Load(&c)
+	assertErrorIs(t, err, config.ErrValidation)
+}
+
+type TestConfigNestedStructValidationError struct {
+	Nested TestConfigValidateError
+}
+
+func (t TestConfigNestedStructValidationError) Validate() error {
+	return nil
+}
+
+func Test_Load_NestedStructValidationError(t *testing.T) {
+	c := TestConfigNestedStructValidationError{}
+	err := config.Load(&c)
+	assertErrorIs(t, err, config.ErrValidation)
+}
