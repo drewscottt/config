@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"strconv"
+	"time"
 )
 
 // ConfigVariable represents a config variable.
@@ -34,6 +35,23 @@ func (c ConfigVariable) ParseIntoType(intoType reflect.Type, loadConfig LoadConf
 	case reflect.String:
 		return reflect.ValueOf(value).Convert(intoType).Interface(), nil
 	case reflect.Int:
+		if value == "" {
+			value = "0"
+		}
+		intValue, err := strconv.Atoi(value)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidValueForVariableType, err)
+		}
+		return reflect.ValueOf(intValue).Convert(intoType).Interface(), nil
+	case reflect.Int64:
+		if intoType == reflect.TypeFor[time.Duration]() {
+			durationValue, err := time.ParseDuration(value)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", ErrInvalidValueForVariableType, err)
+			}
+			return reflect.ValueOf(durationValue).Convert(intoType).Interface(), nil
+		}
+
 		if value == "" {
 			value = "0"
 		}

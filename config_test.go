@@ -19,6 +19,8 @@ type TestConfigAllTypes struct {
 	VarD *config.JSON[JSONConfig] `config:"VAR_D"`
 	VarE bool                     `config:"VAR_E"`
 	VarF *config.HotReload[int]   `config:"VAR_F"`
+	VarG time.Duration            `config:"VAR_G"`
+	VarH int64                    `config:"VAR_H"`
 }
 
 func (t TestConfigAllTypes) Validate() error {
@@ -36,6 +38,8 @@ func Test_Load_Succeeds(t *testing.T) {
 	t.Setenv("VAR_D", `{"field_1": "value1"}`)
 	t.Setenv("VAR_E", "true")
 	t.Setenv("VAR_F", "10")
+	t.Setenv("VAR_G", "10s")
+	t.Setenv("VAR_H", "10")
 	c := TestConfigAllTypes{}
 	err := config.Load(&c)
 	assertNoError(t, err)
@@ -50,6 +54,8 @@ func Test_Load_Succeeds(t *testing.T) {
 	varF, err := c.VarF.Get()
 	assertNoError(t, err)
 	assertEqual(t, 10, varF)
+	assertEqual(t, time.Second*10, c.VarG)
+	assertEqual(t, 10, c.VarH)
 }
 
 func Test_Load_Succeeds_ZeroValues(t *testing.T) {
